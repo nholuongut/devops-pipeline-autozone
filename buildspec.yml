@@ -1,0 +1,48 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      python: 3.10
+    commands:
+      - echo "Installing dependencies"
+      - python3 -m venv env >/dev/null
+      - chmod +x ./env/bin/activate >/dev/null
+      - pip install --upgrade pip --disable-pip-version-check >/dev/null
+      - pip install pylint==2.11.1 >/dev/null
+      - pip install pylint-json2html==0.4.0 >/dev/null
+      - pip install -r requirements.txt >/dev/null
+      - sudo apt-get install jq >/dev/null
+      - pip install tabulate >/dev/null
+      - sudo apt-get update >/dev/null
+      - java --version
+  pre_build:
+    commands:
+      - echo "Running Pylint static code analysis"
+      - which pylint >/dev/null
+      - >-
+        pylint --output-format=json --fail-under=0
+        $CODEBUILD_SRC_DIR/contacts/*.py $CODEBUILD_SRC_DIR/*.py
+        $CODEBUILD_SRC_DIR/accounts/*.py $CODEBUILD_SRC_DIR/autozone/*.py
+        $CODEBUILD_SRC_DIR/cars/*.py > pylint_report.json || true
+      - >-
+        pylint-json2html -f json -o pylint_report.html pylint_report.json
+        >/dev/null
+      - echo "Static code analysis report generated"
+      - >-
+        cat pylint_report.json | jq -r '.[] | [ .module, .type, .message ] |
+        @tsv' | sed 's/[[:space:]]\{2,\}/ /g' | (echo -e "Module\tType\tMessage"
+        && python -c "import sys, tabulate;
+        print(tabulate.tabulate([line.strip().split('\t') for line in
+        sys.stdin]))")
+      - >-
+        echo 'This pre_build Stage is sucessful, please check build logs and sonarcloud terminal to view the analysis report'
+  build:
+    commands:
+      - echo "Running Django migrations"
+      - python manage.py migrate --traceback >/dev/null
+      - echo "Collecting static files"
+      - python manage.py collectstatic --noinput  >/dev/null
+      - echo "Build Stage Successful. Running CodeSecurity Analysis Using sonarcloud in next action phase "
+artifacts:
+  files:
+    - '**/*'
